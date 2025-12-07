@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>REST vs WebSocket Demo</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; max-width: 900px; }
+    h2 { margin-top: 24px; }
+    .row { display: flex; gap: 16px; margin-bottom: 12px; flex-wrap: wrap; }
+    label { display: flex; flex-direction: column; font-size: 14px; }
+    input { padding: 6px; font-size: 14px; width: 160px; }
+    button { padding: 8px 14px; font-size: 14px; cursor: pointer; }
+    pre { background: #111; color: #0f0; padding: 12px; min-height: 200px; overflow: auto; }
+  </style>
+</head>
+<body>
+  <h1>REST vs WebSocket</h1>
+  <p>Connects to the FastAPI server. Adjust size/interval to match your 5s, 10KB+ scenario.</p>
+
+  <h2>REST Polling</h2>
+  <div class="row">
+    <label>API Base
+      <input id="rest-base" value="http://localhost:8000">
+    </label>
+    <label>Size (bytes)
+      <input id="rest-size" type="number" value="20000">
+    </label>
+    <label>Interval (sec)
+      <input id="rest-interval" type="number" value="5">
+    </label>
+    <label>Work (hash rounds)
+      <input id="rest-work" type="number" value="32">
+    </label>
+    <label>Serde loops
+      <input id="rest-serde" type="number" value="0">
+    </label>
+  </div>
+  <div class="row">
+    <button id="rest-start">Start Polling</button>
+    <button id="rest-stop">Stop</button>
+  </div>
+  <pre id="rest-log"></pre>
+
+  <h2>WebSocket Push</h2>
+  <div class="row">
+    <label>WS Base
+      <input id="ws-base" value="ws://localhost:8000">
+    </label>
+    <label>Size (bytes)
+      <input id="ws-size" type="number" value="20000">
+    </label>
+    <label>Interval (sec)
+      <input id="ws-interval" type="number" value="5">
+    </label>
+    <label>Work (hash rounds)
+      <input id="ws-work" type="number" value="32">
+    </label>
+    <label>Serde loops
+      <input id="ws-serde" type="number" value="0">
+    </label>
+  </div>
+  <div class="row">
+    <button id="ws-start">Connect</button>
+    <button id="ws-stop">Disconnect</button>
+  </div>
+  <pre id="ws-log"></pre>
+
+  <script>
+    const restLog = document.getElementById('rest-log');
+    const wsLog = document.getElementById('ws-log');
+    let restTimer = null;
+    let ws = null;
+
+    function log(el, msg) {
+      const line = `[${new Date().toLocaleTimeString()}] ${msg}\n`;
+      el.textContent = line + el.textContent;
+    }
+
+    // REST polling
+    document.getElementById('rest-start').onclick = () => {
+      const base = document.getElementById('rest-base').value;
+      const size = document.getElementById('rest-size').value || 12000;
+      const interval = (document.getElementById('rest-interval').value || 5) * 1000;
+      const work = document.getElementById('rest-work').value || 32;
+      const serde = document.getElementById('rest-serde').value || 0;
+      const url = `${base}/rest-feed?size=${size}&work=${work}&serde=${serde}`;
+      if (restTimer) clearInterval(restTimer);
+      const poll = async () => {
+        const t0 = performance.now();
+        try {
+          const res = await fetch(url, { method: 'POST' });
+          const data = await res.json();
+          const dur = (performance.now() - t0).toFixed(1);
+          log(restLog, `Status ${res.status}, ${dur}ms, size=${data.size}`);
+        } catch (err) {
+          log(restLog, `Error: ${err}`);
+        }
+      };
+      poll();
+      restTimer = setInterval(poll, interval);
+    };
+
+    document.getElementById('rest-stop').onclick = () => {
+      if (restTimer) clearInterval(restTimer);
+      restTimer = null;
+      log(restLog, 'Stopped polling');
+    };
+
+    // WebSocket push
+    document.getElementById('ws-start').onclick = () => {
+      const base = document.getElementById('ws-base').value;
+      const size = document.getElementById('ws-size').value || 12000;
+      const interval = document.getElementById('ws-interval').value || 5;
+      const work = document.getElementById('ws-work').value || 32;
+      const serde = document.getElementById('ws-serde').value || 0;
+      const url = `${base}/ws-feed?size=${size}&interval=${interval}&work=${work}&serde=${serde}`;
+
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.close();
+      }
+
+      ws = new WebSocket(url);
+      const openedAt = performance.now();
+      ws.onopen = () => log(wsLog, 'WebSocket connected');
+      ws.onmessage = (ev) => {
+        const data = JSON.parse(ev.data);
+        const latency = (performance.now() - openedAt).toFixed(1);
+        log(wsLog, `Message size=${data.size}, since open=${latency}ms`);
+      };
+      ws.onerror = (e) => log(wsLog, `Error: ${e.message || e}`);
+      ws.onclose = () => log(wsLog, 'WebSocket closed');
+    };
+
+    document.getElementById('ws-stop').onclick = () => {
+      if (ws) ws.close();
+      ws = null;
+      log(wsLog, 'Closed by user');
+    };
+  </script>
+</body>
+</html>
